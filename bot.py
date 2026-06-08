@@ -6,8 +6,7 @@ from aiogram.fsm.storage.memory import MemoryStorage
 from aiogram.fsm.context import FSMContext
 from aiogram.fsm.state import State, StatesGroup
 from aiogram.types import (
-    Message, CallbackQuery, LabeledPrice,
-    PreCheckoutQuery, SuccessfulPayment,
+    Message, CallbackQuery,
     InlineKeyboardButton
 )
 from aiogram.filters import CommandStart, Command
@@ -16,11 +15,11 @@ from aiogram.utils.keyboard import InlineKeyboardBuilder
 logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s")
 logger = logging.getLogger(__name__)
 
-BOT_TOKEN        = "8608397551:AAE-8Kt72CfS_2zJVi3gO8mfyKw7S2OsGeQ"
-ADMIN_ID         = 8786590613
-NOTIFY_GROUP_ID  = 5213781096
-TON_WALLET       = "UQC1-vfn2v8m350ax_UDKxxI5F8gAyFiGjfaERtK1QXX7qFE"
-ADMIN_USERNAME   = "citemsk"
+BOT_TOKEN       = "8608э397551:AAE-8Kt72CfS_2zJVi3gO8mfyKw7S2OsGeQ"       # @BotFather
+ADMIN_ID        = 8786590613                         # Твой Telegram ID (@userinfobot)
+NOTIFY_GROUP_ID = 5213781096                         # ID группы уведомлений (или = ADMIN_ID)
+TON_WALLET      = "UQC1-vfn2v8m350ax_UDKxxI5F8gAyFiGjfaERtK1QXX7qFE"       # Твой TON адрес
+ADMIN_USERNAME  = "@CiteMsk"                 # Твой username для ссылки "Написать"
 PAYMENT_USERNAME = "@citemsk"
 
 DATABASE_PATH = "shop.db"
@@ -295,8 +294,8 @@ def currency_kb(service_id: int):
     kb = InlineKeyboardBuilder()
     for key, name in CURRENCIES.items():
         kb.button(text=name, callback_data=f"pay:{service_id}:{key}")
-    kb.button(text="↩️ Отмена", callback_data=f"svc:{service_id}")
     kb.adjust(2)
+    kb.row(InlineKeyboardButton(text="↩️ Отмена", callback_data=f"svc:{service_id}"))
     return kb.as_markup()
 
 
@@ -308,11 +307,18 @@ def confirm_payment_kb(service_id: int, currency: str):
     return kb.as_markup()
 
 
-def stars_payment_kb(service_id: int, stars_amount: int):
+def stars_method_kb(service_id: int):
     kb = InlineKeyboardBuilder()
-    kb.button(text=f"⭐ Оплатить {stars_amount} Stars", pay=True)
-    kb.button(text="❌ Отмена", callback_data=f"svc:{service_id}")
-    kb.adjust(1)
+    kb.button(text="🎁 Отправить подарок", callback_data=f"stars_method:{service_id}:gift")
+    kb.button(text="🖼 Отправить NFT",     callback_data=f"stars_method:{service_id}:nft")
+    kb.row(InlineKeyboardButton(text="↩️ Назад", callback_data=f"buy:{service_id}"))
+    return kb.as_markup()
+
+
+def stars_confirm_kb(service_id: int):
+    kb = InlineKeyboardBuilder()
+    kb.button(text="✅ Я отправил(а)", callback_data=f"confirm:{service_id}:stars")
+    kb.row(InlineKeyboardButton(text="↩️ Назад", callback_data=f"buy:{service_id}"))
     return kb.as_markup()
 
 
@@ -543,52 +549,66 @@ async def cb_buy(callback: CallbackQuery):
 
 
 @router.callback_query(F.data.startswith("pay:") & F.data.endswith(":stars"))
-async def cb_pay_stars(callback: CallbackQuery, bot: Bot):
+async def cb_pay_stars(callback: CallbackQuery):
     svc = await get_service(int(callback.data.split(":")[1]))
     if not svc:
         await callback.answer("😔 Услуга не найдена", show_alert=True)
         return
     stars = get_final_price(svc, "stars")
-    await callback.message.delete()
-    await bot.send_invoice(
-        chat_id=callback.from_user.id,
-        title=svc["name"][:32],
-        description=(svc["description"] or "Услуга")[:255],
-        payload=f"svc_{svc['id']}",
-        currency="XTR",
-        prices=[LabeledPrice(label=svc["name"][:32], amount=stars)],
-        reply_markup=stars_payment_kb(svc["id"], stars)
+    await callback.message.edit_text(
+        f"⭐ <b>Оплата звёздами</b>\n\n"
+        f"Услуга: <b>{svc['name']}</b>\n"
+        f"Сумма: <b>{stars} Stars</b>\n\n"
+        f"━━━━━━━━━━━━━━━━━━\n"
+        f"Выбери способ отправки 👇\n\n"
+        f"🎁 <b>Подарок</b> — открой профиль {PAYMENT_USERNAME},\n"
+        f"нажми «Подарить Stars» и укажи сумму\n\n"
+        f"🖼 <b>NFT</b> — отправь NFT на {PAYMENT_USERNAME}\n"
+        f"━━━━━━━━━━━━━━━━━━",
+        reply_markup=stars_method_kb(svc["id"]),
+        parse_mode="HTML"
     )
     await callback.answer()
 
 
-@router.pre_checkout_query()
-async def pre_checkout(query: PreCheckoutQuery):
-    await query.answer(ok=True)
+@router.callback_query(F.data.startswith("stars_method:"))
+async def cb_stars_method(callback: CallbackQuery):
+    parts = callback.data.split(":")
+    service_id_str, method = parts[1], parts[2]
+    svc = await get_service(int(service_id_str))
+    if not svc:
+        await callback.answer("😔 Услуга не найдена", show_alert=True)
+        return
+    stars = get_final_price(svc, "stars")
 
+    if method == "gift":
+        instruction = (
+            f"🎁 <b>Как отправить подарок:</b>\n\n"
+            f"1️⃣ Открой профиль {PAYMENT_USERNAME}\n"
+            f"2️⃣ Нажми «⭐ Подарить Stars»\n"
+            f"3️⃣ Укажи сумму: <b>{stars} Stars</b>\n"
+            f"4️⃣ Подтверди отправку"
+        )
+    else:
+        instruction = (
+            f"🖼 <b>Как отправить NFT:</b>\n\n"
+            f"1️⃣ Открой профиль {PAYMENT_USERNAME}\n"
+            f"2️⃣ Отправь NFT эквивалентный <b>{stars} Stars</b>\n"
+            f"3️⃣ Подтверди отправку"
+        )
 
-@router.message(F.successful_payment)
-async def successful_payment_handler(message: Message, bot: Bot):
-    payment    = message.successful_payment
-    service_id = int(payment.invoice_payload.split("_")[1])
-    svc        = await get_service(service_id)
-    user       = message.from_user
-    username   = fmt_username(user)
-    order_id   = await create_order(
-        user.id, username, user.first_name,
-        service_id, svc["name"] if svc else "?",
-        "Stars", f"{payment.total_amount} ⭐"
-    )
-    await message.answer(
-        f"✅ <b>Оплата прошла!</b>\n\n"
-        f"🎉 Спасибо за покупку~ 💕\n"
-        f"Заказ <b>#{order_id}</b>: {svc['name'] if svc else '?'}\n\n"
+    await callback.message.edit_text(
+        f"⭐ <b>Оплата звёздами</b>\n\n"
+        f"Услуга: <b>{svc['name']}</b>\n"
+        f"Сумма: <b>{stars} Stars</b>\n\n"
         f"━━━━━━━━━━━━━━━━━━\n"
-        f"📩 Напиши мне в ЛС — договоримся о деталях!\n"
-        f"👉 {ADMIN_USERNAME}",
+        f"{instruction}\n\n"
+        f"После отправки нажми кнопку ниже 👇\n"
+        f"━━━━━━━━━━━━━━━━━━",
+        reply_markup=stars_confirm_kb(svc["id"]),
         parse_mode="HTML"
     )
-    await _notify_admin(bot, user, username, svc, f"{payment.total_amount} ⭐ Stars", order_id)
+    await callback.answer()
 
 
 @router.callback_query(F.data.startswith("pay:") & F.data.endswith(":ton"))
