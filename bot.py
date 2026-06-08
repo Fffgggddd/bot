@@ -641,3 +641,102 @@ async def cb_price_select(callback: CallbackQuery, callback_data: AdminCB, state
         await callback.answer("Не найдено", show_alert=True)
         return
     await state.set_state(AdminStates.waiting_price
+    await state.update_data(service_id=svc["id"])
+    await callback.message.edit_text(
+        f"💰 <b>Изменить базовую цену:</b>\n<i>{svc['name']}</i>\n\n"
+        f"Введи новое количество базовых Stars (остальные валюты пересчитаются автоматически):",
+        reply_markup=back_admin_kb(),
+        parse_mode="HTML"
+    )
+    await callback.answer()
+
+@router.message(AdminStates.waiting_price)
+async def process_new_price(message: Message, state: FSMContext):
+    if not is_admin(message.from_user.id):
+        return
+    data = await state.get_data()
+    service_id = data["service_id"]
+    try:
+        value = int(message.text.strip())
+        await update_service_price(service_id, value)
+        svc = await get_service(service_id)
+        await message.answer(f"✅ Базовая цена обновлена!\n<b>{svc['name'] if svc else '?'}</b>\nНовая базовая стоимость: <b>{value} Stars</b>", reply_markup=admin_main_kb(), parse_mode="HTML")
+        await state.clear()
+    except ValueError:
+        await message.answer("❌ Введи корректное целое число!")
+
+@router.callback_query(AdminCB.filter(F.action == "toggle_pick"))
+async def cb_toggle_pick(callback: CallbackQuery, callback_data: AdminCB):
+    if not is_admin(callback.from_user.id):
+        return
+    services = await get_all_services()
+    await callback.message.edit_text("🔀 <b>Вкл/Выкл услугу:</b>\n✅ — активна | 🚫 — скрыта", reply_markup=admin_services_kb(services, "toggle_select", callback_data.page), parse_mode="HTML")
+    await callback.answer()
+
+@router.callback_query(AdminCB.filter(F.action == "toggle_select_page"))
+async def cb_toggle_page(callback: CallbackQuery, callback_data: AdminCB):
+    if not is_admin(callback.from_user.id):
+        return
+    services = await get_all_services()
+    await callback.message.edit_reply_markup(reply_markup=admin_services_kb(services, "toggle_select", callback_data.page))
+    await callback.answer()
+
+@router.callback_query(AdminCB.filter(F.action == "toggle_select"))
+async def cb_toggle_service(callback: CallbackQuery, callback_data: AdminCB):
+    if not is_admin(callback.from_user.id):
+        return
+    svc = await get_service(callback_data.id)
+    if not svc:
+        await callback.answer("Не найдено", show_alert=True)
+        return
+    new_state = 0 if svc["is_active"] else 1
+    await toggle_service(svc["id"], new_state)
+    status = "включена ✅" if new_state else "скрыта 🚫"
+    await callback.answer(f"Услуга {status}!", show_alert=True)
+    services = await get_all_services()
+    await callback.message.edit_reply_markup(reply_markup=admin_services_kb(services, "toggle_select", callback_data.page))
+
+@router.callback_query(AdminCB.filter(F.action == "stats"))
+async def cb_stats(callback: CallbackQuery):
+    if not is_admin(callback.from_user.id):
+        return
+    total = await get_orders_count()
+    services = await get_all_services()
+    active = sum(1 for s in services if s["is_active"])
+    discounted = sum(1 for s in services if s["discount"])
+    await callback.message.edit_text(
+        f"📊 <b>Статистика</b>\n\n"
+        f"📦 Заказов всего: <b>{total}</b>\n"
+        f"🛍 Активных услуг: <b>{active}</b>\n"
+        f"🏷 Со скидкой: <b>{discounted}</b>",
+        reply_markup=back_admin_kb(),
+        parse_mode="HTML"
+    )
+    await callback.answer()
+
+@router.callback_query(AdminCB.filter(F.action == "orders"))
+async def cb_orders(callback: CallbackQuery):
+    if not is_admin(callback.from_user.id):
+        return
+    orders = await get_orders(10)
+    if not orders:
+        await callback.message.edit_text("📦 Заказов пока нет", reply_markup=back_admin_kb())
+        await callback.answer()
+        return
+    lines = ["📦 <b>Последние 10 заказов:</b>\n"]
+    for o in orders:
+        lines.append(f"#{o['id']} | {o['username']} | {o['service_name'][:20]} | {o['amount']} | {o['created_at'][:16]}")
+    await callback.message.edit_text("\n".join(lines)[:4000], reply_markup=back_admin_kb(), parse_mode="HTML")
+    await callback.answer()
+
+async def main():
+    await init_db()
+    bot = Bot(token=BOT_TOKEN)
+    dp = Dispatcher(storage=MemoryStorage())
+    dp.include_router(router)
+    logger.info("🌸 Бот запущен!")
+    await bot.delete_webhook(drop_pending_updates=True)
+    await dp.start_polling(bot)
+
+if __name__ == "__main__":
+    asyncio.run(main())
