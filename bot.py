@@ -15,7 +15,7 @@ from aiogram.utils.keyboard import InlineKeyboardBuilder
 logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s")
 logger = logging.getLogger(__name__)
 
-BOT_TOKEN        = "8608э397551:AAE-8Kt72CfS_2zJVi3gO8mfyKw7S2OsGeQ"
+BOT_TOKEN        = "8608397551:AAE-8Kt72CfS_2zJVi3gO8mfyKw7S2OsGeQ"
 ADMIN_ID         = 8786590613
 NOTIFY_GROUP_ID  = 5213781096
 TON_WALLET       = "UQC1-vfn2v8m350ax_UDKxxI5F8gAyFiGjfaERtK1QXX7qFE"
